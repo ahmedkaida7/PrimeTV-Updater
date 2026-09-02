@@ -1,10 +1,10 @@
+using Apps2Samsung.Backup;
 using Apps2Samsung.Certificate;
 using Apps2Samsung.Interfaces;
 using Apps2Samsung.Models;
 using Apps2Samsung.Packaging;
 using Apps2Samsung.Services;
 using Apps2Samsung.Mobile.Services;
-using Apps2Samsung.Sdb;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.Storage;
 
@@ -13,17 +13,19 @@ namespace Apps2Samsung.Mobile.Pages;
 public sealed class PrimeTvUpdaterPage : ContentPage
 {
     private const string SavedTvKey = "primetv.updater.tv";
+    private const string SavedWgtNameKey = "primetv.updater.wgtname";
+    private static string SavedWgtPath => Path.Combine(FileSystem.AppDataDirectory, "PrimeTV-selected.wgt");
+    private static string CertStorePath => new MobileAppConfig().CertificateStorePath;
 
     private readonly INetworkService _networkService;
     private readonly CertificateProvisioner _certProvisioner;
     private readonly WgtInstaller _installer;
-    private readonly ISdbEngine _sdb;
 
     private readonly Picker _tvPicker = new() { Title = "Samsung TV" };
     private readonly Entry _manualIp = new() { Placeholder = "TV IP address (optional)" };
     private readonly Label _headline = new()
     {
-        Text = "Update Required",
+        Text = "PrimeTV Update",
         FontSize = 24,
         FontAttributes = FontAttributes.Bold,
         HorizontalTextAlignment = TextAlignment.Center,
@@ -31,40 +33,43 @@ public sealed class PrimeTvUpdaterPage : ContentPage
     };
     private readonly Label _updateInfo = new()
     {
-        Text = "Choose the new PrimeTV package once, then tap Update Now.",
+        Text = "Choose the PrimeTV WGT, then tap Update TV.",
         FontSize = 14,
         HorizontalTextAlignment = TextAlignment.Center,
         TextColor = Color.FromArgb("#A8B8CD")
     };
     private readonly Button _scan = new() { Text = "Find TV" };
-    private readonly Button _pick = new() { Text = "Choose Update Package (.wgt)" };
+    private readonly Button _pick = new() { Text = "Select PrimeTV WGT" };
     private readonly Button _install = new()
     {
-        Text = "Update Now",
+        Text = "Update TV",
         FontAttributes = FontAttributes.Bold,
-        BackgroundColor = Color.FromArgb("#D71920"),
+        BackgroundColor = Color.FromArgb("#38546E"),
         TextColor = Colors.White
     };
-    private readonly Button _replace = new()
+    private readonly Button _importBackup = new()
     {
-        Text = "Replace Existing PrimeTV",
+        Text = "Import Apps2Samsung Signing Backup",
         FontAttributes = FontAttributes.Bold,
-        BackgroundColor = Color.FromArgb("#A72121"),
-        TextColor = Colors.White,
-        IsVisible = false
+        BackgroundColor = Color.FromArgb("#6B4D16"),
+        TextColor = Colors.White
+    };
+    private readonly Label _certHelp = new()
+    {
+        Text = "Only needed if the TV says ‘Author certificate not match’. In the Apps2Samsung app that originally installed PrimeTV: Settings → Backup & Restore → Export Backup. Then import that ZIP here once.",
+        FontSize = 12,
+        TextColor = Color.FromArgb("#8EA0B7")
     };
     private readonly Label _selected = new()
     {
         Text = "No update package selected",
         FontSize = 13,
-        HorizontalTextAlignment = TextAlignment.Center,
-        TextColor = Color.FromArgb("#A8B8CD")
+        TextColor = Colors.White
     };
     private readonly Label _status = new()
     {
         Text = "Ready",
         FontSize = 14,
-        HorizontalTextAlignment = TextAlignment.Center,
         TextColor = Colors.White
     };
     private readonly ProgressBar _progress = new() { Progress = 0 };
@@ -78,49 +83,20 @@ public sealed class PrimeTvUpdaterPage : ContentPage
     public PrimeTvUpdaterPage(
         INetworkService networkService,
         CertificateProvisioner certProvisioner,
-        WgtInstaller installer,
-        ISdbEngine sdb)
+        WgtInstaller installer)
     {
         _networkService = networkService;
         _certProvisioner = certProvisioner;
         _installer = installer;
-        _sdb = sdb;
 
         Title = "PrimeTV Updater";
-        BackgroundColor = Color.FromArgb("#05070B");
+        BackgroundColor = Color.FromArgb("#06101E");
 
         _scan.Clicked += async (_, _) => await ScanAsync();
         _pick.Clicked += async (_, _) => await PickWgtAsync();
-        _install.Clicked += async (_, _) => await RunInstallAsync(forceReplace: false);
-        _replace.Clicked += async (_, _) => await ConfirmAndReplaceAsync();
+        _install.Clicked += async (_, _) => await RunInstallAsync();
+        _importBackup.Clicked += async (_, _) => await ImportSigningBackupAsync();
         _tvPicker.SelectedIndexChanged += (_, _) => RememberTv();
-
-        var updateCard = new Border
-        {
-            Stroke = Color.FromArgb("#202631"),
-            StrokeThickness = 1,
-            BackgroundColor = Color.FromArgb("#0B0D12"),
-            Padding = new Thickness(18, 22),
-            Content = new VerticalStackLayout
-            {
-                Spacing = 12,
-                Children =
-                {
-                    new Label
-                    {
-                        Text = "🚀",
-                        FontSize = 42,
-                        HorizontalTextAlignment = TextAlignment.Center
-                    },
-                    _headline,
-                    _updateInfo,
-                    _progress,
-                    _install,
-                    _replace,
-                    _status
-                }
-            }
-        };
 
         Content = new ScrollView
         {
@@ -143,31 +119,38 @@ public sealed class PrimeTvUpdaterPage : ContentPage
                         FontSize = 14,
                         TextColor = Color.FromArgb("#8294AA")
                     },
-                    updateCard,
-                    new Label
+                    new Border
                     {
-                        Text = "TV",
-                        FontSize = 13,
-                        FontAttributes = FontAttributes.Bold,
-                        TextColor = Color.FromArgb("#8294AA")
+                        Stroke = Color.FromArgb("#20314A"),
+                        StrokeThickness = 1,
+                        BackgroundColor = Color.FromArgb("#091426"),
+                        Padding = new Thickness(18, 20),
+                        Content = new VerticalStackLayout
+                        {
+                            Spacing = 12,
+                            Children = { _headline, _updateInfo, _progress, _status }
+                        }
                     },
                     _tvPicker,
                     _manualIp,
                     _scan,
-                    new BoxView { HeightRequest = 1, Color = Color.FromArgb("#202631") },
-                    new Label
-                    {
-                        Text = "Local update package",
-                        FontSize = 13,
-                        FontAttributes = FontAttributes.Bold,
-                        TextColor = Color.FromArgb("#8294AA")
-                    },
                     _pick,
                     _selected,
+                    _install,
+                    new BoxView { HeightRequest = 1, Color = Color.FromArgb("#20314A") },
                     new Label
                     {
-                        Text = "After this updater becomes the signer for PrimeTV, later WGT updates use the same author certificate and install as normal updates.",
-                        FontSize = 12,
+                        Text = "Certificate migration (one time)",
+                        FontSize = 14,
+                        FontAttributes = FontAttributes.Bold,
+                        TextColor = Colors.White
+                    },
+                    _importBackup,
+                    _certHelp,
+                    new Label
+                    {
+                        Text = "PrimeTV Updater v0.2 • Never removes the installed PrimeTV automatically on a certificate mismatch.",
+                        FontSize = 11,
                         TextColor = Color.FromArgb("#6F8198")
                     }
                 }
@@ -178,9 +161,17 @@ public sealed class PrimeTvUpdaterPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        var saved = Preferences.Default.Get(SavedTvKey, "");
-        if (!string.IsNullOrWhiteSpace(saved))
-            _manualIp.Text = saved;
+        var savedTv = Preferences.Default.Get(SavedTvKey, "");
+        if (!string.IsNullOrWhiteSpace(savedTv))
+            _manualIp.Text = savedTv;
+
+        if (File.Exists(SavedWgtPath))
+        {
+            _wgtPath = SavedWgtPath;
+            _selectedName = Preferences.Default.Get(SavedWgtNameKey, "PrimeTV update.wgt");
+            _selected.Text = "Selected: " + _selectedName;
+        }
+
         await ScanAsync();
     }
 
@@ -198,23 +189,20 @@ public sealed class PrimeTvUpdaterPage : ContentPage
             _devices.Clear();
             _ips.Clear();
             var labels = new List<string>();
-
             foreach (var d in found)
             {
                 _devices.Add(d);
                 _ips.Add(d.IpAddress);
                 labels.Add(d.DisplayText);
             }
-
             _tvPicker.ItemsSource = labels;
+
             var saved = Preferences.Default.Get(SavedTvKey, "");
             var idx = _ips.IndexOf(saved);
             if (idx >= 0) _tvPicker.SelectedIndex = idx;
             else if (_ips.Count > 0) _tvPicker.SelectedIndex = 0;
 
-            SetStatus(_ips.Count > 0
-                ? $"TV ready • {_ips.Count} found"
-                : "TV not found automatically. Enter its IP below.");
+            SetStatus(_ips.Count > 0 ? $"TV ready • {_ips.Count} found" : "TV not found automatically. Enter its IP.");
         }
         catch (Exception ex)
         {
@@ -231,10 +219,7 @@ public sealed class PrimeTvUpdaterPage : ContentPage
     {
         try
         {
-            var result = await FilePicker.Default.PickAsync(new PickOptions
-            {
-                PickerTitle = "Choose PrimeTV update (.wgt)"
-            });
+            var result = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Choose PrimeTV update (.wgt)" });
             if (result is null) return;
             if (!result.FileName.EndsWith(".wgt", StringComparison.OrdinalIgnoreCase))
             {
@@ -242,19 +227,22 @@ public sealed class PrimeTvUpdaterPage : ContentPage
                 return;
             }
 
-            var dest = Path.Combine(FileSystem.CacheDirectory, "PrimeTV-selected.wgt");
-            await using var input = await result.OpenReadAsync();
-            await using var output = File.Create(dest);
-            await input.CopyToAsync(output);
+            var temp = SavedWgtPath + ".new";
+            if (File.Exists(temp)) File.Delete(temp);
+            await using (var input = await result.OpenReadAsync())
+            await using (var output = File.Create(temp))
+                await input.CopyToAsync(output);
 
-            _wgtPath = dest;
+            if (File.Exists(SavedWgtPath)) File.Delete(SavedWgtPath);
+            File.Move(temp, SavedWgtPath);
+            _wgtPath = SavedWgtPath;
             _selectedName = result.FileName;
-            _selected.Text = "Ready: " + result.FileName;
-            _headline.Text = "Update Required";
-            _updateInfo.Text = "New PrimeTV package ready. Tap Update Now to install it on the TV.";
-            _replace.IsVisible = false;
+            Preferences.Default.Set(SavedWgtNameKey, _selectedName);
+            _selected.Text = "Selected: " + _selectedName;
             _progress.Progress = 0;
-            SetStatus("Update package ready.");
+            _headline.Text = "Update Ready";
+            _updateInfo.Text = "The package is saved on this phone. You do not have to select it again after reopening the updater.";
+            SetStatus("Ready to update TV.");
         }
         catch (Exception ex)
         {
@@ -262,11 +250,64 @@ public sealed class PrimeTvUpdaterPage : ContentPage
         }
     }
 
+    private async Task ImportSigningBackupAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        SetButtons(false);
+        try
+        {
+            _headline.Text = "Certificate Migration";
+            SetStatus("Choose the backup ZIP exported by Apps2Samsung…");
+            var picked = await SafFilePicker.PickAsync("application/zip", "application/octet-stream");
+            if (picked is null)
+            {
+                SetStatus("Backup import cancelled.");
+                return;
+            }
+
+            BackupImportResult imported;
+            using (var stream = File.OpenRead(picked.LocalPath))
+                imported = BackupService.Import(stream, CertStorePath);
+
+            DefaultCertificateToImportedProfile();
+            _headline.Text = "Signing Certificate Imported";
+            _updateInfo.Text = $"Restored {imported.CertificateFilesRestored} certificate file(s). PrimeTV updates can now use the same author identity as the original installer.";
+            SetStatus("Certificate ready. Retrying the PrimeTV update…");
+        }
+        catch (Exception ex)
+        {
+            _headline.Text = "Certificate Import Failed";
+            SetStatus("Could not import Apps2Samsung backup: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            _busy = false;
+            SetButtons(true);
+        }
+
+        if (File.Exists(SavedWgtPath) && ResolveTvIp() is not null)
+            await RunInstallAsync();
+    }
+
+    private static void DefaultCertificateToImportedProfile()
+    {
+        bool Has(CertificatePrivilegeLevel level) =>
+            CertificateProvisioningService.HasUsableAuthorCert(
+                Path.Combine(CertStorePath, CertificateProvisioningService.ProfileName(level)));
+
+        var partner = Has(CertificatePrivilegeLevel.Partner);
+        var pub = Has(CertificatePrivilegeLevel.Public);
+        if (partner && !pub) MobileSettings.CertificatePreference = MobileSettings.CertificatePreferencePartner;
+        else if (pub && !partner) MobileSettings.CertificatePreference = MobileSettings.CertificatePreferencePublic;
+        else MobileSettings.CertificatePreference = MobileSettings.CertificatePreferenceAuto;
+    }
+
     private string? ResolveTvIp()
     {
         if (_tvPicker.SelectedIndex >= 0 && _tvPicker.SelectedIndex < _ips.Count)
             return _ips[_tvPicker.SelectedIndex];
-
         var manual = (_manualIp.Text ?? "").Trim();
         return System.Net.IPAddress.TryParse(manual, out _) ? manual : null;
     }
@@ -274,18 +315,16 @@ public sealed class PrimeTvUpdaterPage : ContentPage
     private void RememberTv()
     {
         var ip = ResolveTvIp();
-        if (ip is not null)
-            Preferences.Default.Set(SavedTvKey, ip);
+        if (ip is not null) Preferences.Default.Set(SavedTvKey, ip);
     }
 
-    private async Task RunInstallAsync(bool forceReplace)
+    private async Task RunInstallAsync()
     {
         if (_busy) return;
         if (string.IsNullOrWhiteSpace(_wgtPath) || !File.Exists(_wgtPath))
         {
             await PickWgtAsync();
-            if (string.IsNullOrWhiteSpace(_wgtPath) || !File.Exists(_wgtPath))
-                return;
+            if (string.IsNullOrWhiteSpace(_wgtPath) || !File.Exists(_wgtPath)) return;
         }
 
         var tvIp = ResolveTvIp();
@@ -294,19 +333,16 @@ public sealed class PrimeTvUpdaterPage : ContentPage
             SetStatus("Select a TV or enter its IP address.");
             return;
         }
-
         Preferences.Default.Set(SavedTvKey, tvIp);
+
         _busy = true;
         SetButtons(false);
-        _replace.IsVisible = false;
         _progress.Progress = 0.08;
-
         try
         {
             NetworkDevice? device = null;
             var idx = _ips.IndexOf(tvIp);
-            if (idx >= 0 && idx < _devices.Count)
-                device = _devices[idx];
+            if (idx >= 0 && idx < _devices.Count) device = _devices[idx];
 
             var guardResult = InstallGuards.Evaluate(device,
                 new InstallGuardOptions
@@ -318,49 +354,36 @@ public sealed class PrimeTvUpdaterPage : ContentPage
 
             foreach (var guard in guardResult.Guards)
             {
-                var go = await DisplayAlert(
-                    guard.DefaultTitle,
-                    guard.DefaultMessageWithDetail,
-                    "Continue",
-                    "Stop");
+                var go = await DisplayAlert(guard.DefaultTitle, guard.DefaultMessageWithDetail, "Continue", "Stop");
                 if (!go) return;
             }
 
             tvIp = guardResult.CorrectedTvIp ?? tvIp;
-            _progress.Progress = 0.24;
-
-            if (forceReplace)
-            {
-                _headline.Text = "Preparing Clean Update";
-                SetStatus("Removing the old PrimeTV package…");
-                await RemoveExistingPrimeTvAsync(tvIp, _wgtPath);
-                _progress.Progress = 0.42;
-            }
-
-            SetStatus("Preparing PrimeTV signing certificate…");
+            _progress.Progress = 0.28;
+            _headline.Text = "Preparing Update";
+            SetStatus("Preparing the signing certificate…");
             var needsPartner = WgtPrivileges.RequiresPartner(_wgtPath);
             var cert = await _certProvisioner.ProvisionAsync(tvIp, needsPartner, SetStatus);
-            _progress.Progress = 0.62;
 
-            _headline.Text = "Updating…";
-            SetStatus("Installing PrimeTV on " + tvIp + "…");
+            _progress.Progress = 0.62;
+            _headline.Text = "Updating TV…";
+            SetStatus("Installing " + (_selectedName ?? "PrimeTV") + "…");
             await _installer.InstallAsync(tvIp, _wgtPath, cert, SetStatus);
 
-            _progress.Progress = 1.0;
+            _progress.Progress = 1;
             _headline.Text = "Update Complete";
             _updateInfo.Text = (_selectedName ?? "PrimeTV") + " is installed on the TV.";
-            _install.Text = "Installed";
             SetStatus("✓ PrimeTV updated successfully.");
         }
         catch (Exception ex)
         {
             var message = ex.Message ?? "Unknown install error";
+            _progress.Progress = 0.65;
             if (IsAuthorMismatch(message))
             {
-                _headline.Text = "One-Time Migration Required";
-                _updateInfo.Text = "The PrimeTV already on this TV was signed by a different author certificate. The updater can remove that old copy, wait for the TV to finish removing it, and install the selected build with the updater certificate.";
-                _replace.IsVisible = true;
-                SetStatus("Author certificate mismatch [118, -11]. Tap Replace Existing PrimeTV.");
+                _headline.Text = "Signing Certificate Needed";
+                _updateInfo.Text = "The PrimeTV already installed on this TV was signed by the original Apps2Samsung certificate. Import that Apps2Samsung backup once below. PrimeTV Updater will NOT uninstall the working app.";
+                SetStatus("Author certificate mismatch [118, -11]. Import Apps2Samsung Signing Backup, then the updater will retry automatically.");
             }
             else
             {
@@ -375,63 +398,6 @@ public sealed class PrimeTvUpdaterPage : ContentPage
         }
     }
 
-    private async Task ConfirmAndReplaceAsync()
-    {
-        var go = await DisplayAlert(
-            "Replace existing PrimeTV?",
-            "This one-time migration removes the current PrimeTV app from the TV and installs the selected build again. Local PrimeTV settings/history stored by the old installation may be reset. Continue?",
-            "Replace",
-            "Cancel");
-        if (go)
-            await RunInstallAsync(forceReplace: true);
-    }
-
-    private async Task RemoveExistingPrimeTvAsync(string tvIp, string wgtPath)
-    {
-        var (appId, packageId) = await WgtManifest.ReadIdsAsync(wgtPath);
-        if (string.IsNullOrWhiteSpace(packageId))
-            throw new InvalidOperationException("Could not read the PrimeTV package id from config.xml.");
-
-        var result = await _sdb.UninstallAsync(tvIp, packageId!);
-        var raw = ((result.Output ?? "") + "\n" + (result.Error ?? "")).Trim();
-        if (result.ExitCode != 0 && !raw.Contains("failed[132]", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The TV refused to remove the old PrimeTV package: " + raw);
-
-        // Samsung can acknowledge vd_appuninstall before the package database is fully updated.
-        // Do not immediately reinstall: that race is what can leave [118, -11] author mismatch.
-        for (var attempt = 0; attempt < 24; attempt++)
-        {
-            await Task.Delay(attempt == 0 ? 1200 : 700);
-            try
-            {
-                var listed = await _sdb.AppsAsync(tvIp);
-                var text = listed.Output ?? string.Empty;
-                if (text.Contains("Could not retrieve app list", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var apps = TizenInstalledApps.Parse(text).ToList();
-                var stillInstalled = apps.Any(a =>
-                    a.TizenId.Equals(packageId, StringComparison.OrdinalIgnoreCase) ||
-                    (!string.IsNullOrWhiteSpace(appId) &&
-                     a.AppId?.Equals(appId, StringComparison.OrdinalIgnoreCase) == true));
-
-                if (!stillInstalled && !text.Contains(packageId!, StringComparison.OrdinalIgnoreCase))
-                {
-                    await _sdb.DisconnectAsync(tvIp);
-                    await Task.Delay(900);
-                    return;
-                }
-            }
-            catch
-            {
-                // Keep polling; a reconnect during uninstall completion is normal on some TVs.
-            }
-        }
-
-        throw new InvalidOperationException(
-            "The TV has not finished removing the old PrimeTV package. Wait a few seconds and tap Replace Existing PrimeTV again.");
-    }
-
     private static bool IsAuthorMismatch(string text) =>
         text.Contains("Author certificate", StringComparison.OrdinalIgnoreCase) ||
         text.Contains("different certificate", StringComparison.OrdinalIgnoreCase) ||
@@ -440,14 +406,8 @@ public sealed class PrimeTvUpdaterPage : ContentPage
 
     private List<string> SafeLocalIps()
     {
-        try
-        {
-            return _networkService.GetRelevantLocalIPs().Select(ip => ip.ToString()).ToList();
-        }
-        catch
-        {
-            return new List<string>();
-        }
+        try { return _networkService.GetRelevantLocalIPs().Select(ip => ip.ToString()).ToList(); }
+        catch { return new List<string>(); }
     }
 
     private void SetButtons(bool enabled)
@@ -455,7 +415,6 @@ public sealed class PrimeTvUpdaterPage : ContentPage
         _scan.IsEnabled = enabled;
         _pick.IsEnabled = enabled;
         _install.IsEnabled = enabled;
-        if (_replace.IsVisible)
-            _replace.IsEnabled = enabled;
+        _importBackup.IsEnabled = enabled;
     }
 }
