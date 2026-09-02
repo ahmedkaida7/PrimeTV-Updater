@@ -1,0 +1,11 @@
+{
+  "channel": "stable",
+  "version": "1.6.5",
+  "displayName": "PrimeTV v1.3.2 Player Overhaul",
+  "wgtFile": "PrimeTV_Tizen_v1.3.2_PLAYER_OVERHAUL.wgt",
+  "wgtUrl": "",
+  "sha256": "e3633bc4e5512facc8cfd942c11c27c209cd60b6034e82d7f6693d9c13517c8a",
+  "packageId": "PrimeTV003",
+  "applicationId": "PrimeTV003.PrimeTV",
+  "notes": "Generated-design UI, APK-style Live menu, stream failover, search preview and player overhaul."
+}
