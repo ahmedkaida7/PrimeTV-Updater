@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Apps2Samsung/Apps2Samsung
-          ref: beta
+          ref: 4880f0ecb51a8ae8d1b9a4f6aa7cd7ea0ee55972
           path: Apps2Samsung
 
       - name: Setup .NET 10
@@ -83,14 +83,14 @@ jobs:
             --ks-key-alias primetvupdater \
             --ks-pass "pass:$PASS" \
             --key-pass "pass:$PASS" \
-            --out out/PrimeTV-Updater-v0.1.2-SIGNED.apk \
+            --out out/PrimeTV-Updater-v0.2.0-SIGNED.apk \
             out/PrimeTV-Updater-aligned.apk
           rm out/PrimeTV-Updater-aligned.apk
-          "$APKSIGNER" verify --verbose --print-certs out/PrimeTV-Updater-v0.1.2-SIGNED.apk | tee out/signature-verification.txt
-          sha256sum out/PrimeTV-Updater-v0.1.2-SIGNED.apk | tee out/PrimeTV-Updater-v0.1.2-SIGNED.apk.sha256
+          "$APKSIGNER" verify --verbose --print-certs out/PrimeTV-Updater-v0.2.0-SIGNED.apk | tee out/signature-verification.txt
+          sha256sum out/PrimeTV-Updater-v0.2.0-SIGNED.apk | tee out/PrimeTV-Updater-v0.2.0-SIGNED.apk.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PrimeTV-Updater-v0.1.2-SIGNED
+          name: PrimeTV-Updater-v0.2.0-SIGNED
           path: out/*
