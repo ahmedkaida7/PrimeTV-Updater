@@ -33,24 +33,29 @@ jobs:
       - name: Restore
         run: dotnet restore Apps2Samsung/Apps2Samsung.Mobile/Apps2Samsung.Mobile.csproj
 
-      - name: Build APK
+      # Debug configuration intentionally uses Android's standard debug signing key.
+      # The previous Release artifact was unsigned and Android rejected it as "App not installed".
+      - name: Build signed APK
         run: >-
           dotnet publish Apps2Samsung/Apps2Samsung.Mobile/Apps2Samsung.Mobile.csproj
-          -c Release -f net10.0-android
+          -c Debug -f net10.0-android
           -p:AndroidPackageFormats=apk
-          -p:AndroidKeyStore=false
 
-      - name: Collect APK
+      - name: Collect and verify signed APK
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p out
-          APK=$(find Apps2Samsung/Apps2Samsung.Mobile/bin/Release -type f -name '*.apk' | head -n 1)
+          APK=$(find Apps2Samsung/Apps2Samsung.Mobile/bin/Debug -type f -name '*.apk' | head -n 1)
           test -n "$APK"
-          cp "$APK" out/PrimeTV-Updater-v0.1.apk
-          sha256sum out/PrimeTV-Updater-v0.1.apk | tee out/PrimeTV-Updater-v0.1.apk.sha256
+          cp "$APK" out/PrimeTV-Updater-v0.1.1-SIGNED.apk
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs out/PrimeTV-Updater-v0.1.1-SIGNED.apk | tee out/signature-verification.txt
+          sha256sum out/PrimeTV-Updater-v0.1.1-SIGNED.apk | tee out/PrimeTV-Updater-v0.1.1-SIGNED.apk.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PrimeTV-Updater-v0.1
+          name: PrimeTV-Updater-v0.1.1-SIGNED
           path: out/*
