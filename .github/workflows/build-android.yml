@@ -1,0 +1,56 @@
+name: Build PrimeTV Updater APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout updater overlay
+        uses: actions/checkout@v4
+
+      - name: Checkout Apps2Samsung engine
+        uses: actions/checkout@v4
+        with:
+          repository: Apps2Samsung/Apps2Samsung
+          ref: beta
+          path: Apps2Samsung
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install MAUI Android workload
+        run: dotnet workload install maui-android
+
+      - name: Apply PrimeTV updater overlay
+        run: python3 apply_overlay.py Apps2Samsung
+
+      - name: Restore
+        run: dotnet restore Apps2Samsung/Apps2Samsung.Mobile/Apps2Samsung.Mobile.csproj
+
+      - name: Build APK
+        run: >-
+          dotnet publish Apps2Samsung/Apps2Samsung.Mobile/Apps2Samsung.Mobile.csproj
+          -c Release -f net10.0-android
+          -p:AndroidPackageFormats=apk
+          -p:AndroidKeyStore=false
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          mkdir -p out
+          APK=$(find Apps2Samsung/Apps2Samsung.Mobile/bin/Release -type f -name '*.apk' | head -n 1)
+          test -n "$APK"
+          cp "$APK" out/PrimeTV-Updater-v0.1.apk
+          sha256sum out/PrimeTV-Updater-v0.1.apk | tee out/PrimeTV-Updater-v0.1.apk.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrimeTV-Updater-v0.1
+          path: out/*
