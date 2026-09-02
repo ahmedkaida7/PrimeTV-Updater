@@ -36,14 +36,25 @@ if s2 == s:
     raise SystemExit("App.xaml.cs first-page anchor not found")
 p.write_text(s2, encoding='utf-8')
 
-# Rename/version the Android app. Certificate mismatch recovery is handled by
-# importing the original Apps2Samsung backup; never auto-uninstall PrimeTV.
+# Rename/version the Android app.
 p = mobile / "Apps2Samsung.Mobile.csproj"
 s = p.read_text(encoding='utf-8-sig')
 s = re.sub(r"<ApplicationTitle>.*?</ApplicationTitle>", "<ApplicationTitle>PrimeTV Updater</ApplicationTitle>", s)
 s = re.sub(r"<ApplicationId>.*?</ApplicationId>", "<ApplicationId>com.primetv.updater</ApplicationId>", s)
 s = re.sub(r"<ApplicationDisplayVersion>.*?</ApplicationDisplayVersion>", "<ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>", s)
 s = re.sub(r"<ApplicationVersion>.*?</ApplicationVersion>", "<ApplicationVersion>2</ApplicationVersion>", s)
+p.write_text(s, encoding='utf-8')
+
+# IMPORTANT: the generic Apps2Samsung recovery path can remove an existing app after a
+# certificate mismatch. PrimeTV Updater must never do that automatically because it would
+# destroy the working installation before the original author certificate is migrated.
+p = mobile / "Services" / "WgtInstaller.cs"
+s = p.read_text(encoding='utf-8-sig')
+needle = '''\t\tbool certMismatch = TizenInstallDiagnostics.IsCertificateMismatch(output);\n\t\tbool outOfSpace = TizenInstallDiagnostics.IsInsufficientSpace(output);'''
+replacement = '''\t\tbool certMismatch = TizenInstallDiagnostics.IsCertificateMismatch(output);\n\t\tbool outOfSpace = TizenInstallDiagnostics.IsInsufficientSpace(output);\n\n\t\t// PrimeTV Updater preserves the working app. The user can import the original\n\t\t// Apps2Samsung backup (author.p12 + profile) and retry without uninstalling anything.\n\t\tif (certMismatch)\n\t\t\tthrow new InvalidOperationException(\n\t\t\t\t"Author certificate mismatch [118, -11]. Import the Apps2Samsung signing backup in PrimeTV Updater and retry.");'''
+if needle not in s:
+    raise SystemExit("WgtInstaller certificate mismatch anchor not found")
+s = s.replace(needle, replacement, 1)
 p.write_text(s, encoding='utf-8')
 
 print("PrimeTV Updater overlay applied successfully.")
